@@ -1,6 +1,5 @@
 import { google } from 'googleapis';
 
-// Configurazione dalle variabili d'ambiente (GitHub Secrets)
 const CLIENT_ID = process.env.GMAIL_CLIENT_ID;
 const CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET;
 const REFRESH_TOKEN = process.env.GMAIL_REFRESH_TOKEN;
@@ -12,53 +11,53 @@ const gmail = google.gmail({ version: 'v1', auth });
 
 async function runBot() {
   try {
-    console.log('Avvio scansione email...');
-
-    // 1. Cerca le email con l'etichetta "Typescript"
     const res = await gmail.users.messages.list({
       userId: 'me',
       q: 'label:Typescript', 
     });
 
-    if (!res.data.messages || res.data.messages.length === 0) {
-      console.log('Nessuna email trovata con questa etichetta.');
+    if (!res.data.messages) {
+      console.log('Nessuna email trovata.');
       return;
     }
 
     for (const msg of res.data.messages) {
-      const details = await gmail.users.messages.get({
-        userId: 'me',
-        id: msg.id!,
-      });
+      const details = await gmail.users.messages.get({ userId: 'me', id: msg.id! });
+      const body = details.data.snippet + " " + (details.data.payload?.body?.data || "");
+      const decodedBody = Buffer.from(details.data.payload?.body?.data || "", 'base64').toString();
+      const fullText = decodedBody + " " + details.data.snippet;
 
-      const snippet = details.data.snippet || "";
-      const body = details.data.payload?.body?.data 
-        ? Buffer.from(details.data.payload.body.data, 'base64').toString() 
-        : snippet;
+      // Estrazione dati mirata sull'email Airbnb di Clara
+      const checkIn = fullText.match(/Check-in\s+([A-Z]{3}\s\d{1,2}\s[A-Z]{3})/i)?.[1] || "N/D";
+      const checkOut = fullText.match(/Check-out\s+([A-Z]{3}\s\d{1,2}\s[A-Z]{3})/i)?.[1] || "N/D";
+      const ospiti = fullText.match(/OSPITI\s+(\d+)\sadulti/i)?.[1] || "N/D";
+      const compensoHost = fullText.match(/COMPENSO DELL'HOST[\s\S]*?TOTALE \(EUR\)\s+([\d,.]+)/i)?.[1] || "0,00";
+      const pulizia = fullText.match(/Costi di pulizia\s+([\d,.]+)/i)?.[1] || "0,00";
 
-      // 2. Estrazione dati con Regex (Formato Airbnb)
-      const dataArrivo = body.match(/(\d{1,2}\s\w+\s\d{4})/)?.[0] || "Data non trovata";
-      const numeroOspiti = body.match(/(\d+)\sospit/)?.[1] || "N/A";
-      const guadagno = body.match(/Guadagno totale:\s€?([\d,.]+)/)?.[1] || "0,00";
-      const pulizia = body.match(/pulizia:\s€?([\d,.]+)/)?.[1] || "0,00";
+      // Creazione contenuto file Markdown per Obsidian
+      const fileName = `Prenotazione_Airbnb_${checkIn.replace(/\s/g, '_')}.md`;
+      const fileContent = `---
+tag: prenotazioni/airbnb
+data_estrazione: ${new Date().toLocaleDateString()}
+---
+# 🏠 Prenotazione Airbnb: ${checkIn} - ${checkOut}
 
-      // 3. Formattazione per Obsidian
-      const dataOggi = new Date().toISOString().split('T')[0];
-      
-      console.log('--- COPIA DA QUI PER OBSIDIAN ---');
-      console.log(`## Prenotazione Airbnb - ${dataArrivo}`);
-      console.log(`- **Data Estrazione**: ${dataOggi}`);
-      console.log(`- **Check-in**: ${dataArrivo}`);
-      console.log(`- **Ospiti**: ${numeroOspiti}`);
-      console.log(`- **Guadagno Netto**: €${guadagno}`);
-      console.log(`- **Spese Pulizia**: €${pulizia}`);
-      console.log(`- **Link ID**: https://mail.google.com/mail/u/0/#inbox/${msg.id}`);
-      console.log('--- FINE NOTA ---');
+- **Ospiti**: ${ospiti} adulti 
+- **Check-in**: ${checkIn} 
+- **Check-out**: ${checkOut} 
+- **Codice Conferma**: ${fullText.match(/CODICE DI CONFERMA\s+([A-Z0-9]+)/)?.[1] || "N/D"} 
+
+## 💰 Dati Finanziari
+- **Compenso Host**: €${compensoHost} 
+- **Costi Pulizia**: €${pulizia} 
+
+---
+*Generato automaticamente da Gmail Bot*`;
+
+      console.log(`\n--- INIZIO FILE: ${fileName} ---`);
+      console.log(fileContent);
+      console.log(`--- FINE FILE ---\n`);
     }
-
-  } catch (error) {
-    console.error('Errore durante l\'esecuzione:', error);
-  }
+  } catch (e) { console.error(e); }
 }
-
 runBot();
