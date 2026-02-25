@@ -7,68 +7,43 @@ const gmail = google.gmail({ version: 'v1', auth });
 async function runBot() {
   try {
     const res = await gmail.users.messages.list({ userId: 'me', q: 'label:Typescript' });
-    if (!res.data.messages) return;
+    if (!res.data.messages) return console.log("Nessuna mail trovata.");
 
     for (const msg of res.data.messages) {
-      const details = await gmail.users.messages.get({ userId: 'me', id: msg.id!, format: 'full' });
+      const details = await gmail.users.messages.get({ userId: 'me', id: msg.id! });
       
-      // 1. RECUPERO TESTO: Cerchiamo la parte 'text/plain' che è la più pulita
-      let body = "";
+      // 1. Prendi l'Oggetto della mail
+      const subject = details.data.payload?.headers?.find(h => h.name === 'Subject')?.value || "Senza Oggetto";
+      
+      // 2. Prendi il testo (snippet) e prova a decodificare il corpo se esiste
+      let bodyText = details.data.snippet || "";
+      
+      // Tentativo di recuperare il testo piano se disponibile, altrimenti resta lo snippet
       const part = details.data.payload?.parts?.find(p => p.mimeType === 'text/plain');
       if (part?.body?.data) {
-        body = Buffer.from(part.body.data, 'base64').toString();
-      } else {
-        body = details.data.snippet || "";
+        bodyText = Buffer.from(part.body.data, 'base64').toString();
       }
 
-      // 2. ANALISI SEQUENZIALE (Come richiesto)
-      
-      // DATE: Airbnb spesso scrive "Arrivo: GIO, 29 AGO". Cerchiamo il pattern Giorno + Mese.
-      const allDates = body.match(/(\d{1,2}\s+[a-z]{3})/gi) || [];
-      // Filtriamo via i numeri sospetti (come codici tracking da 2 cifre)
-      const validDates = allDates.filter(d => !d.includes("NUO") && !d.includes("77"));
-      const arrivo = validDates[0] || "N/D";
-      const partenza = validDates[1] || "N/D";
-
-      // OSPITI: Cerchiamo la parola "adulti" o "ospiti" e prendiamo il numero precedente
-      const ospitiMatch = body.match(/(\d+)\s+(?:adulti|ospiti|ospite)/i);
-      const ospiti = ospitiMatch ? ospitiMatch[1] : "N/D";
-
-      // FINANZE: Cerchiamo le cifre con la virgola (es. 299,63) vicino alle parole chiave
-      const findMoney = (keyword: string) => {
-        const regex = new RegExp(`${keyword}[\\s\\S]{0,50}([\\d]{1,3}(?:[.,]\\d{2})?)`, 'i');
-        const match = body.match(regex);
-        return match ? match[1] : "0,00";
-      };
-
-      const costiStanza = findMoney("Costi della stanza");
-      const pulizia = findMoney("Costi di pulizia");
-      const guadagnoNetto = findMoney("Tu guadagni");
-      const notti = body.match(/(\d+)\s+notti/i)?.[1] || "N/D";
-
-      // 3. GENERAZIONE FILE MARKDOWN
-      const fileName = `Airbnb_${arrivo.replace(/\s/g, '_')}.md`;
+      // 3. Formattazione pulita per Obsidian
+      const fileName = `Mail_${msg.id}.md`;
       const fileContent = `---
-tag: prenotazioni/airbnb
+tag: mail/importate
+id: ${msg.id}
 ---
-# 🏠 Prenotazione Airbnb: ${arrivo}
-- **Arrivo**: ${arrivo}
-- **Partenza**: ${partenza}
-- **Notti**: ${notti}
-- **Ospiti**: ${ospiti}
+# ✉️ ${subject}
 
-## 💰 Dettaglio Economico
-- **Costi Stanza (Lordo)**: €${costiStanza}
-- **Spese Pulizia**: €${pulizia}
-- **TU GUADAGNI (Netto)**: €${guadagnoNetto}
+## Contenuto della Mail:
+${bodyText}
 
 ---
-[Link Mail](https://mail.google.com/mail/u/0/#inbox/${msg.id})`;
+[Apri su Gmail](https://mail.google.com/mail/u/0/#inbox/${msg.id})`;
 
-      console.log(`\n--- INIZIO FILE: ${fileName} ---`);
+      console.log(`\n--- INIZIO NOTA: ${fileName} ---`);
       console.log(fileContent);
-      console.log(`--- FINE ---`);
+      console.log(`--- FINE NOTA ---\n`);
     }
-  } catch (e) { console.error("Errore:", e); }
+  } catch (e) { 
+    console.error("Errore nel bot:", e); 
+  }
 }
 runBot();
