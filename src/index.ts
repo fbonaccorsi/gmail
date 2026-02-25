@@ -1,45 +1,51 @@
 import { google } from 'googleapis';
 
-const CLIENT_ID = process.env.GMAIL_CLIENT_ID;
-const CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET;
-const REFRESH_TOKEN = process.env.GMAIL_REFRESH_TOKEN;
-
-const auth = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET);
-auth.setCredentials({ refresh_token: REFRESH_TOKEN });
+const auth = new google.auth.OAuth2(process.env.GMAIL_CLIENT_ID, process.env.GMAIL_CLIENT_SECRET);
+auth.setCredentials({ refresh_token: process.env.GMAIL_REFRESH_TOKEN });
 const gmail = google.gmail({ version: 'v1', auth });
 
 async function runBot() {
   try {
     const res = await gmail.users.messages.list({ userId: 'me', q: 'label:Typescript' });
-    if (!res.data.messages) return console.log('Nessuna mail.');
+    if (!res.data.messages) return;
 
     for (const msg of res.data.messages) {
       const details = await gmail.users.messages.get({ userId: 'me', id: msg.id! });
+      const fullText = details.data.snippet + " " + (details.data.payload?.body?.data ? Buffer.from(details.data.payload.body.data, 'base64').toString() : "");
+
+      // Estrazione mirata sul formato dell'email di Lori 
+      const ospiteNome = fullText.match(/ARRIVERÀ IL (.*?)\./i)?.[1] || "Ospite";
+      const checkIn = fullText.match(/(?:GIO|VEN|SAB|DOM|LUN|MAR|MER)\s(\d{1,2}\s[A-Z]{3})/i)?.[0] || "N/D";
+      const checkOut = fullText.match(/Check-out\s+.*?\s+(?:GIO|VEN|SAB|DOM|LUN|MAR|MER)\s(\d{1,2}\s[A-Z]{3})/i)?.[1] || "N/D";
+      const ospiti = fullText.match(/OSPITI\s+(\d+)\sadulti/i)?.[1] || "N/D";
       
-      // Funzione per estrarre tutto il testo possibile dalla mail
-      let fullText = details.data.snippet || "";
-      const parts = details.data.payload?.parts || [];
-      parts.forEach(p => {
-        if (p.body?.data) fullText += Buffer.from(p.body.data, 'base64').toString();
-      });
+      // Dati Finanziari
+      const prezzoNotte = fullText.match(/([\d,.]+)\s*€\sx\s\d+\s*notti/i)?.[1] || "0,00";
+      const pulizia = fullText.match(/Costi di pulizia\s+([\d,.]+)/i)?.[1] || "0,00";
+      const guadagnoHost = fullText.match(/COMPENSO DELL'HOST[\s\S]*?TOTALE \(EUR\)\s+([\d,.]+)/i)?.[1] || "0,00";
 
-      // Estrazione migliorata (Regex più flessibili)
-      const checkIn = fullText.match(/(?:Check-in|Arrivo)[:\s]+([A-Z]{3}\s\d{1,2}|[\d\/]+)/i)?.[1] || "Senza_Data";
-      const ospiti = fullText.match(/(\d+)\s(?:ospiti|adulti)/i)?.[1] || "1";
-      const totale = fullText.match(/(?:Totale|Compenso|EUR|€)\s*([\d,.]+)/i)?.[1] || "0,00";
-
+      const fileName = `Prenotazione_${ospiteNome}_${checkIn.replace(/\s/g, '_')}.md`;
       const fileContent = `---
-tag: prenotazioni/airbnb
+tipo: soggiorno_airbnb
+ospite: ${ospiteNome}
 ---
-# Prenotazione Airbnb: ${checkIn}
+# 🏠 Prenotazione: ${ospiteNome}
+- **Check-in**: ${checkIn}
+- **Check-out**: ${checkOut}
 - **Ospiti**: ${ospiti}
-- **Totale**: €${totale}
-- [Vedi Mail](https://mail.google.com/mail/u/0/#inbox/${msg.id})`;
 
-      // STAMPA IL CONTENUTO (Così lo vedi nel log)
-      console.log(`FILE_NAME: Prenotazione_${checkIn.replace(/\s/g, '_')}.md`);
+## 💶 Dati Economici
+- **Prezzo a notte**: €${prezzoNotte}
+- **Costi Pulizia**: €${pulizia}
+- **Guadagno Netto Host**: €${guadagnoHost}
+
+---
+[Apri Email](https://mail.google.com/mail/u/0/#inbox/${msg.id})`;
+
+      console.log(`\n--- COPIA IL TESTO SOTTO E SALVALO COME: ${fileName} ---`);
       console.log(fileContent);
+      console.log(`--- FINE FILE ---\n`);
     }
-  } catch (e) { console.error(e); }
+  } catch (e) { console.error("Errore:", e); }
 }
 runBot();
