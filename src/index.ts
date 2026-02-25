@@ -12,54 +12,54 @@ async function runBot() {
     for (const msg of res.data.messages) {
       const details = await gmail.users.messages.get({ userId: 'me', id: msg.id! });
       
-      // Uniamo snippet e body per non perdere nulla
+      // Estraiamo il testo e puliamolo da ogni simbolo strano o tag HTML
       let fullText = (details.data.snippet || "");
       if (details.data.payload?.parts) {
         details.data.payload.parts.forEach(p => {
           if (p.body?.data) fullText += " " + Buffer.from(p.body.data, 'base64').toString();
         });
-      } else if (details.data.payload?.body?.data) {
-        fullText += " " + Buffer.from(details.data.payload.body.data, 'base64').toString();
       }
+      // Pulizia estrema per facilitare la ricerca
+      const clean = fullText.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ');
 
-      // PULIZIA: Rimuoviamo i tag HTML per evitare interferenze
-      const cleanText = fullText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+      // 1. DATA ARRIVO E PARTENZA (Cerca sequenze tipo "29 ago" o "31 ago")
+      const dateTrovate = clean.match(/(\d{1,2}\s+[a-z]{3})/gi) || [];
+      const arrivo = dateTrovate[0] || "Non trovata";
+      const partenza = dateTrovate[1] || "Non trovata";
 
-      // 1. OSPITI: Cerca il numero che precede "adulti" o "ospiti"
-      const ospiti = cleanText.match(/(\d+)\s*(?:adulti|ospiti|ospite)/i)?.[1] || "N/D";
-      
-      // 2. NOTTI: Cerca il numero che precede "notti"
-      const notti = cleanText.match(/(\d+)\s*notti/i)?.[1] || "N/D";
-      
-      // 3. GUADAGNO: Cerca la cifra dopo "TOTALE (EUR)" o "Compenso" o il simbolo €
-      // Questa regex è più forte: cerca un numero con virgola o punto preceduto da EUR o €
-      const guadagno = cleanText.match(/(?:TOTALE \(EUR\)|Compenso|EUR|€)\s*([\d,.]+)/i)?.[1] || "0,00";
-      
-      // 4. PULIZIA: Cerca specificamente la riga delle pulizie
-      const pulizia = cleanText.match(/(?:pulizia)\s*€?\s*([\d,.]+)/i)?.[1] || "0,00";
+      // 2. COMPENSO HOST (Cerca la cifra dopo "COMPENSO DELL'HOST" o "TOTALE")
+      // Cerchiamo un numero che abbia la virgola dopo parole chiave finanziarie
+      const compensoMatch = clean.match(/(?:COMPENSO|TOTALE|PAGAMENTO).*?(\d+[\d,.]*)/i);
+      const compenso = compensoMatch ? compensoMatch[1] : "0,00";
 
-      // 5. DATA ARRIVO
-      const arrivo = cleanText.match(/(?:arrivo|check-in)\s*([0-9]{1,2}\s*[a-z]{3})/i)?.[1] || "Data_N_D";
+      // 3. PULIZIA
+      const puliziaMatch = clean.match(/(?:pulizia).*?(\d+[\d,.]*)/i);
+      const pulizia = puliziaMatch ? puliziaMatch[1] : "0,00";
+
+      // 4. OSPITI E NOTTI
+      const ospiti = clean.match(/(\d+)\s+(?:adulti|ospiti)/i)?.[1] || "N/D";
+      const notti = clean.match(/(\d+)\s+notti/i)?.[1] || "N/D";
 
       const fileName = `Airbnb_${arrivo.replace(/\s/g, '_')}.md`;
       const fileContent = `---
 tag: prenotazioni/airbnb
 ---
-# 🏠 Dettaglio Prenotazione
-- **Check-in**: ${arrivo}
+# 🏠 Prenotazione Airbnb
+- **Arrivo**: ${arrivo}
+- **Partenza**: ${partenza}
 - **Notti**: ${notti}
 - **Ospiti**: ${ospiti}
 
-## 💰 Dati Economici
-- **Guadagno Host**: €${guadagno}
-- **Spese Pulizia**: €${pulizia}
+## 💰 Dettaglio Finanziario
+- **Compenso Host**: €${compenso}
+- **Costi Pulizia**: €${pulizia}
 
 ---
-[Link Mail](https://mail.google.com/mail/u/0/#inbox/${msg.id})`;
+*ID Messaggio: ${msg.id}*`;
 
-      console.log(`\n--- COPIA IL FILE: ${fileName} ---`);
+      console.log(`\n--- INIZIO FILE: ${fileName} ---`);
       console.log(fileContent);
-      console.log(`--- FINE ---`);
+      console.log(`--- FINE FILE ---\n`);
     }
   } catch (e) { console.error("Errore:", e); }
 }
