@@ -11,6 +11,7 @@ async function runBot() {
 
     for (const msg of res.data.messages) {
       const details = await gmail.users.messages.get({ userId: 'me', id: msg.id! });
+      
       let fullText = (details.data.snippet || "");
       if (details.data.payload?.parts) {
         details.data.payload.parts.forEach(p => {
@@ -18,23 +19,31 @@ async function runBot() {
         });
       }
       
-      // Pulizia testo
+      // Pulizia totale e normalizzazione degli spazi
       const clean = fullText.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ');
 
-      // 1. TU GUADAGNI (Il valore netto finale)
-      const guadagnoNetto = clean.match(/Tu\s*guadagni\s*([\d,.]+)/i)?.[1] || "0,00";
+      // 1. DATE (Arrivo e Partenza)
+      // Cerchiamo le date espresse come "numero + 3 lettere mese" (es: 29 ago, 31 ago)
+      const dateMatches = clean.match(/(\d{1,2}\s+[a-z]{3})/gi) || [];
+      const arrivo = dateMatches[0] || "N/D";
+      const partenza = dateMatches[1] || "N/D";
 
-      // 2. COSTI STANZA (Il lordo prima delle tasse/pulizie)
-      const costiStanza = clean.match(/Costi\s*della\s*stanza.*?\s*([\d,.]+)/i)?.[1] || "0,00";
-
-      // 3. PULIZIA
-      const pulizia = clean.match(/Costi\s*di\s*pulizia\s*([\d,.]+)/i)?.[1] || "0,00";
-
-      // 4. DATE E NOTTI (Migliorate per evitare codici strani)
-      const arrivo = clean.match(/Arrivo\s*([0-9]{1,2}\s*[a-z]{3})/i)?.[1] || "N/D";
-      const partenza = clean.match(/Partenza\s*([0-9]{1,2}\s*[a-z]{3})/i)?.[1] || "N/D";
+      // 2. OSPITI E NOTTI
+      // Usiamo una logica più flessibile per saltare eventuali numeri di tracking
+      const ospiti = clean.match(/(\d+)\s*(?:adulti|ospiti|ospite)/i)?.[1] || "N/D";
       const notti = clean.match(/(\d+)\s*notti/i)?.[1] || "N/D";
-      const ospiti = clean.match(/(\d+)\s*(?:adulti|ospiti)/i)?.[1] || "N/D";
+
+      // 3. DATI FINANZIARI (Logica a "prossimità")
+      // Cerchiamo il numero che segue immediatamente i tuoi termini chiave
+      const extractMoney = (key: string) => {
+        const regex = new RegExp(`${key}.*?(\\d+[\\d,.]*)`, 'i');
+        const match = clean.match(regex);
+        return match ? match[1] : "0,00";
+      };
+
+      const costiStanza = extractMoney("Costi della stanza");
+      const pulizia = extractMoney("Costi di pulizia");
+      const guadagnoNetto = extractMoney("Tu guadagni");
 
       const fileName = `Airbnb_${arrivo.replace(/\s/g, '_')}.md`;
       const fileContent = `---
