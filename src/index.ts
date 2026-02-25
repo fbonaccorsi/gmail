@@ -7,54 +7,60 @@ const gmail = google.gmail({ version: 'v1', auth });
 async function runBot() {
   try {
     const res = await gmail.users.messages.list({ userId: 'me', q: 'label:Typescript' });
-    if (!res.data.messages) return console.log("Nessuna mail trovata.");
+    if (!res.data.messages) return;
 
     for (const msg of res.data.messages) {
       const details = await gmail.users.messages.get({ userId: 'me', id: msg.id! });
       
-      // Estraiamo il testo puro eliminando i tag HTML molesti
-      let rawText = details.data.snippet || "";
+      // Uniamo snippet e body per non perdere nulla
+      let fullText = (details.data.snippet || "");
       if (details.data.payload?.parts) {
         details.data.payload.parts.forEach(p => {
-          if (p.mimeType === 'text/plain' && p.body?.data) {
-            rawText += Buffer.from(p.body.data, 'base64').toString();
-          }
+          if (p.body?.data) fullText += " " + Buffer.from(p.body.data, 'base64').toString();
         });
+      } else if (details.data.payload?.body?.data) {
+        fullText += " " + Buffer.from(details.data.payload.body.data, 'base64').toString();
       }
 
-      // 1. DATA DI ARRIVO (Cerca formati come "29 ago" o "29/08")
-      const dataArrivo = rawText.match(/(?:Arrivo|Check-in)[:\s]+([0-9]{1,2}\s[a-z]{3}|[0-9]{2}\/[0-9]{2})/i)?.[1] || "Data_Non_Trovata";
-      
-      // 2. NUMERO NOTTI
-      const notti = rawText.match(/(\d+)\s+notti/i)?.[1] || "1";
-      
-      // 3. OSPITI
-      const ospiti = rawText.match(/(\d+)\s+(?:ospiti|adulti)/i)?.[1] || "1";
-      
-      // 4. DATI FINANZIARI (Cerca il simbolo € seguito da numeri)
-      const guadagno = rawText.match(/(?:Compenso|Totale|EUR|€)\s*([\d,.]+)/i)?.[1] || "0,00";
-      const pulizia = rawText.match(/(?:Pulizia)[:\s]+€?\s*([\d,.]+)/i)?.[1] || "0,00";
+      // PULIZIA: Rimuoviamo i tag HTML per evitare interferenze
+      const cleanText = fullText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
 
-      const fileName = `Prenotazione_${dataArrivo.replace(/\s/g, '_')}.md`;
+      // 1. OSPITI: Cerca il numero che precede "adulti" o "ospiti"
+      const ospiti = cleanText.match(/(\d+)\s*(?:adulti|ospiti|ospite)/i)?.[1] || "N/D";
+      
+      // 2. NOTTI: Cerca il numero che precede "notti"
+      const notti = cleanText.match(/(\d+)\s*notti/i)?.[1] || "N/D";
+      
+      // 3. GUADAGNO: Cerca la cifra dopo "TOTALE (EUR)" o "Compenso" o il simbolo €
+      // Questa regex è più forte: cerca un numero con virgola o punto preceduto da EUR o €
+      const guadagno = cleanText.match(/(?:TOTALE \(EUR\)|Compenso|EUR|€)\s*([\d,.]+)/i)?.[1] || "0,00";
+      
+      // 4. PULIZIA: Cerca specificamente la riga delle pulizie
+      const pulizia = cleanText.match(/(?:pulizia)\s*€?\s*([\d,.]+)/i)?.[1] || "0,00";
+
+      // 5. DATA ARRIVO
+      const arrivo = cleanText.match(/(?:arrivo|check-in)\s*([0-9]{1,2}\s*[a-z]{3})/i)?.[1] || "Data_N_D";
+
+      const fileName = `Airbnb_${arrivo.replace(/\s/g, '_')}.md`;
       const fileContent = `---
 tag: prenotazioni/airbnb
 ---
-# 🏠 Nuova Prenotazione
-- **Check-in**: ${dataArrivo}
+# 🏠 Dettaglio Prenotazione
+- **Check-in**: ${arrivo}
 - **Notti**: ${notti}
 - **Ospiti**: ${ospiti}
 
-## 💰 Dettaglio Economico
+## 💰 Dati Economici
 - **Guadagno Host**: €${guadagno}
 - **Spese Pulizia**: €${pulizia}
 
 ---
 [Link Mail](https://mail.google.com/mail/u/0/#inbox/${msg.id})`;
 
-      console.log(`\n--- COPIA QUESTO FILE: ${fileName} ---`);
+      console.log(`\n--- COPIA IL FILE: ${fileName} ---`);
       console.log(fileContent);
-      console.log(`--- FINE FILE ---\n`);
+      console.log(`--- FINE ---`);
     }
-  } catch (e) { console.error("Errore critico:", e); }
+  } catch (e) { console.error("Errore:", e); }
 }
 runBot();
