@@ -11,55 +11,52 @@ async function runBot() {
 
     for (const msg of res.data.messages) {
       const details = await gmail.users.messages.get({ userId: 'me', id: msg.id! });
-      
-      // Estraiamo il testo e puliamolo da ogni simbolo strano o tag HTML
       let fullText = (details.data.snippet || "");
       if (details.data.payload?.parts) {
         details.data.payload.parts.forEach(p => {
           if (p.body?.data) fullText += " " + Buffer.from(p.body.data, 'base64').toString();
         });
       }
-      // Pulizia estrema per facilitare la ricerca
+      
+      // Pulizia testo
       const clean = fullText.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ');
 
-      // 1. DATA ARRIVO E PARTENZA (Cerca sequenze tipo "29 ago" o "31 ago")
-      const dateTrovate = clean.match(/(\d{1,2}\s+[a-z]{3})/gi) || [];
-      const arrivo = dateTrovate[0] || "Non trovata";
-      const partenza = dateTrovate[1] || "Non trovata";
+      // 1. TU GUADAGNI (Il valore netto finale)
+      const guadagnoNetto = clean.match(/Tu\s*guadagni\s*([\d,.]+)/i)?.[1] || "0,00";
 
-      // 2. COMPENSO HOST (Cerca la cifra dopo "COMPENSO DELL'HOST" o "TOTALE")
-      // Cerchiamo un numero che abbia la virgola dopo parole chiave finanziarie
-      const compensoMatch = clean.match(/(?:COMPENSO|TOTALE|PAGAMENTO).*?(\d+[\d,.]*)/i);
-      const compenso = compensoMatch ? compensoMatch[1] : "0,00";
+      // 2. COSTI STANZA (Il lordo prima delle tasse/pulizie)
+      const costiStanza = clean.match(/Costi\s*della\s*stanza.*?\s*([\d,.]+)/i)?.[1] || "0,00";
 
       // 3. PULIZIA
-      const puliziaMatch = clean.match(/(?:pulizia).*?(\d+[\d,.]*)/i);
-      const pulizia = puliziaMatch ? puliziaMatch[1] : "0,00";
+      const pulizia = clean.match(/Costi\s*di\s*pulizia\s*([\d,.]+)/i)?.[1] || "0,00";
 
-      // 4. OSPITI E NOTTI
-      const ospiti = clean.match(/(\d+)\s+(?:adulti|ospiti)/i)?.[1] || "N/D";
-      const notti = clean.match(/(\d+)\s+notti/i)?.[1] || "N/D";
+      // 4. DATE E NOTTI (Migliorate per evitare codici strani)
+      const arrivo = clean.match(/Arrivo\s*([0-9]{1,2}\s*[a-z]{3})/i)?.[1] || "N/D";
+      const partenza = clean.match(/Partenza\s*([0-9]{1,2}\s*[a-z]{3})/i)?.[1] || "N/D";
+      const notti = clean.match(/(\d+)\s*notti/i)?.[1] || "N/D";
+      const ospiti = clean.match(/(\d+)\s*(?:adulti|ospiti)/i)?.[1] || "N/D";
 
       const fileName = `Airbnb_${arrivo.replace(/\s/g, '_')}.md`;
       const fileContent = `---
 tag: prenotazioni/airbnb
 ---
-# 🏠 Prenotazione Airbnb
+# 🏠 Prenotazione Airbnb: ${arrivo}
 - **Arrivo**: ${arrivo}
 - **Partenza**: ${partenza}
 - **Notti**: ${notti}
 - **Ospiti**: ${ospiti}
 
-## 💰 Dettaglio Finanziario
-- **Compenso Host**: €${compenso}
-- **Costi Pulizia**: €${pulizia}
+## 💰 Dettaglio Economico
+- **Costi Stanza (Lordo)**: €${costiStanza}
+- **Spese Pulizia**: €${pulizia}
+- **TU GUADAGNI (Netto)**: €${guadagnoNetto}
 
 ---
-*ID Messaggio: ${msg.id}*`;
+*ID: ${msg.id}*`;
 
-      console.log(`\n--- INIZIO FILE: ${fileName} ---`);
+      console.log(`\n--- COPIA IL FILE: ${fileName} ---`);
       console.log(fileContent);
-      console.log(`--- FINE FILE ---\n`);
+      console.log(`--- FINE ---`);
     }
   } catch (e) { console.error("Errore:", e); }
 }
