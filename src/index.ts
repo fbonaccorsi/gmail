@@ -10,41 +10,43 @@ async function runBot() {
     if (!res.data.messages) return;
 
     for (const msg of res.data.messages) {
-      const details = await gmail.users.messages.get({ userId: 'me', id: msg.id! });
+      const details = await gmail.users.messages.get({ userId: 'me', id: msg.id!, format: 'full' });
       
-      let fullText = (details.data.snippet || "");
-      if (details.data.payload?.parts) {
-        details.data.payload.parts.forEach(p => {
-          if (p.body?.data) fullText += " " + Buffer.from(p.body.data, 'base64').toString();
-        });
+      // 1. RECUPERO TESTO: Cerchiamo la parte 'text/plain' che è la più pulita
+      let body = "";
+      const part = details.data.payload?.parts?.find(p => p.mimeType === 'text/plain');
+      if (part?.body?.data) {
+        body = Buffer.from(part.body.data, 'base64').toString();
+      } else {
+        body = details.data.snippet || "";
       }
+
+      // 2. ANALISI SEQUENZIALE (Come richiesto)
       
-      // Pulizia totale e normalizzazione degli spazi
-      const clean = fullText.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ');
+      // DATE: Airbnb spesso scrive "Arrivo: GIO, 29 AGO". Cerchiamo il pattern Giorno + Mese.
+      const allDates = body.match(/(\d{1,2}\s+[a-z]{3})/gi) || [];
+      // Filtriamo via i numeri sospetti (come codici tracking da 2 cifre)
+      const validDates = allDates.filter(d => !d.includes("NUO") && !d.includes("77"));
+      const arrivo = validDates[0] || "N/D";
+      const partenza = validDates[1] || "N/D";
 
-      // 1. DATE (Arrivo e Partenza)
-      // Cerchiamo le date espresse come "numero + 3 lettere mese" (es: 29 ago, 31 ago)
-      const dateMatches = clean.match(/(\d{1,2}\s+[a-z]{3})/gi) || [];
-      const arrivo = dateMatches[0] || "N/D";
-      const partenza = dateMatches[1] || "N/D";
+      // OSPITI: Cerchiamo la parola "adulti" o "ospiti" e prendiamo il numero precedente
+      const ospitiMatch = body.match(/(\d+)\s+(?:adulti|ospiti|ospite)/i);
+      const ospiti = ospitiMatch ? ospitiMatch[1] : "N/D";
 
-      // 2. OSPITI E NOTTI
-      // Usiamo una logica più flessibile per saltare eventuali numeri di tracking
-      const ospiti = clean.match(/(\d+)\s*(?:adulti|ospiti|ospite)/i)?.[1] || "N/D";
-      const notti = clean.match(/(\d+)\s*notti/i)?.[1] || "N/D";
-
-      // 3. DATI FINANZIARI (Logica a "prossimità")
-      // Cerchiamo il numero che segue immediatamente i tuoi termini chiave
-      const extractMoney = (key: string) => {
-        const regex = new RegExp(`${key}.*?(\\d+[\\d,.]*)`, 'i');
-        const match = clean.match(regex);
+      // FINANZE: Cerchiamo le cifre con la virgola (es. 299,63) vicino alle parole chiave
+      const findMoney = (keyword: string) => {
+        const regex = new RegExp(`${keyword}[\\s\\S]{0,50}([\\d]{1,3}(?:[.,]\\d{2})?)`, 'i');
+        const match = body.match(regex);
         return match ? match[1] : "0,00";
       };
 
-      const costiStanza = extractMoney("Costi della stanza");
-      const pulizia = extractMoney("Costi di pulizia");
-      const guadagnoNetto = extractMoney("Tu guadagni");
+      const costiStanza = findMoney("Costi della stanza");
+      const pulizia = findMoney("Costi di pulizia");
+      const guadagnoNetto = findMoney("Tu guadagni");
+      const notti = body.match(/(\d+)\s+notti/i)?.[1] || "N/D";
 
+      // 3. GENERAZIONE FILE MARKDOWN
       const fileName = `Airbnb_${arrivo.replace(/\s/g, '_')}.md`;
       const fileContent = `---
 tag: prenotazioni/airbnb
@@ -61,9 +63,9 @@ tag: prenotazioni/airbnb
 - **TU GUADAGNI (Netto)**: €${guadagnoNetto}
 
 ---
-*ID: ${msg.id}*`;
+[Link Mail](https://mail.google.com/mail/u/0/#inbox/${msg.id})`;
 
-      console.log(`\n--- COPIA IL FILE: ${fileName} ---`);
+      console.log(`\n--- INIZIO FILE: ${fileName} ---`);
       console.log(fileContent);
       console.log(`--- FINE ---`);
     }
