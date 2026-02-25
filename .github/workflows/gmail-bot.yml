@@ -9,11 +9,11 @@ runs-on: ubuntu-latest
 steps:
 - uses: actions/checkout@v4
 - uses: actions/setup-node@v4
-with:
-node-version: 20
+  with:
+    node-version: 20
 - run: npm install
 - run: npx tsc
-- run: nod	e dist/index.js
+- run: node dist/index.js
 env:
 GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
 GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
